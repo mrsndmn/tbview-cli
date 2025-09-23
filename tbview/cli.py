@@ -43,11 +43,13 @@ def run_main(args):
             for file in files:
                 if is_event_file(file):
                     size = os.path.getsize(os.path.join(root, file))
-                    target_options.append((root, file, size))
+
+                    display_path_no_prefix = root.replace(path, '').lstrip(os.sep)
+                    target_options.append((root, file, size, display_path_no_prefix))
         if len(target_options) == 0:
             raise RuntimeError(f"No event file found in directory {path}")
-        target_options = sorted(target_options, key=lambda x:x[2], reverse=True)
-        options = [f'[{i}] {local_event_dir(op[0])}/{local_event_name(op[1])}'for i, op in enumerate(target_options)]
+        target_options = sorted(target_options, key=lambda x:x[1], reverse=True)
+        options = [f'[{i}] {op[3]}/{local_event_name(op[1])}'for i, op in enumerate(target_options)]
         options[0] += ' (default)'
         questions = [
             inquirer.List('choice',
