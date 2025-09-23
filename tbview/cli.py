@@ -11,7 +11,7 @@ def check_file_or_directory(path):
     return path
 
 def is_event_file(path:str):
-    return path.startswith('events.out.tfevents')
+    return os.path.basename(path).startswith('events.out.tfevents')
 
 def local_event_name(path):
     base = os.path.basename(path)
@@ -25,7 +25,7 @@ def local_event_dir(path):
     return dir
 
 def run_main(args):
-    path = args.path
+    path = os.path.abspath(args.path)
 
     if os.path.isfile(path):
         if is_event_file(path):
@@ -42,7 +42,7 @@ def run_main(args):
         for root, dirs, files in os.walk(path):
             for file in files:
                 if is_event_file(file):
-                    size = os.path.getsize(os.path.join(path, root, file))
+                    size = os.path.getsize(os.path.join(root, file))
                     target_options.append((root, file, size))
         if len(target_options) == 0:
             raise RuntimeError(f"No event file found in directory {path}")
