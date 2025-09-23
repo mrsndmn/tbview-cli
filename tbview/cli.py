@@ -49,23 +49,41 @@ def run_main(args):
         if len(target_options) == 0:
             raise RuntimeError(f"No event file found in directory {path}")
         target_options = sorted(target_options, key=lambda x:x[1], reverse=True)
-        options = [f'[{i}] {op[3]}/{local_event_name(op[1])}'for i, op in enumerate(target_options)]
-        options[0] += ' (default)'
-        questions = [
-            inquirer.List('choice',
-                            message="Found more than one event file, please select with arrow keys",
-                            choices=options,
-                            carousel=True,
-                            )
-        ]
-        answers = inquirer.prompt(questions)
-        if answers is None:
-            return
-        select_index = options.index(answers['choice'])
+        options = [f'[{i}] {op[3]}/{local_event_name(op[1])}' for i, op in enumerate(target_options)]
 
-        target_event_path = os.path.abspath(os.path.join(target_options[select_index][0], target_options[select_index][1]))
-        target_event_name = local_event_name(target_options[select_index][1])
-        target_event_dir = local_event_dir(target_options[select_index][0])
+        # Loop to support going back from viewer with 'q'
+        while True:
+            questions = [
+                inquirer.Checkbox('choices',
+                                   message="Select one or more event files (space to toggle, enter to view)",
+                                   choices=options,
+                                   carousel=True,
+                                   )
+            ]
+            answers = inquirer.prompt(questions)
+            if answers is None:
+                return
+            selected = answers.get('choices') or []
+            if not selected:
+                return
+
+            # Map selections to event paths and tags
+            selected_indices = [options.index(choice) for choice in selected]
+            selected_event_paths = []
+            selected_event_tags = []
+            for idx in selected_indices:
+                root, file, _size, _disp = target_options[idx]
+                ev_path = os.path.abspath(os.path.join(root, file))
+                ev_name = local_event_name(file)
+                ev_dir = local_event_dir(root)
+                ev_tag = ev_dir if ev_dir is not None else ev_name
+                selected_event_paths.append(ev_path)
+                selected_event_tags.append(ev_tag)
+
+            tbviewer = TensorboardViewer(selected_event_paths, selected_event_tags)
+            should_reselect = tbviewer.run()
+            if not should_reselect:
+                return
     
     target_event_tag = target_event_name if target_event_dir is None else target_event_dir
 
