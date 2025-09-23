@@ -30,7 +30,7 @@ class TensorboardViewer:
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Ctrl+C to quit.\n\n 4.Press 's' to toggle smoothing (0/5/10/20).", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Ctrl+C to quit.\n\n 4.Press 's' to toggle smoothing (0/10/50/100/200).", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -43,9 +43,12 @@ class TensorboardViewer:
         self.records = OrderedDict()
         self._last_offset = 0
         self._last_scan_size = 0
-        self._profile_enabled = True
+        self._profile_enabled = False
         self._frame_count = 0
         self._last_fps_log = 0.0
+        import os, time
+        self._last_seen_mtime = os.path.getmtime(self.event_path)
+        self._last_scan_ts = time.time()
         self.scan_event(initial=True)
 
 
@@ -67,6 +70,8 @@ class TensorboardViewer:
                     self.records[value.tag][event.step] = value.simple_value
             self._last_offset = end_off
         self._last_scan_size = current_size
+        self._last_seen_mtime = os.path.getmtime(self.event_path)
+        self._last_scan_ts = time.time()
 
         self.tag_selector.options = [
             f'[{i+1}] {root_tag} '
@@ -106,10 +111,18 @@ class TensorboardViewer:
         key = keys[safe_idx]
         steps = list(self.records[key].keys())
         values = list(self.records[key].values())
+        # ensure ordered by step and compute last step for title
+        if steps:
+            sorted_steps = sorted(steps)
+            values = [self.records[key][s] for s in sorted_steps]
+            last_step = sorted_steps[-1]
+        else:
+            sorted_steps = steps
+            last_step = None
         if self.smoothing_window and self.smoothing_window > 1:
             values = self._moving_average(values, self.smoothing_window)
-        plt.title(f"{key} (smooth={self.smoothing_window})")
-        plt.plot(steps, values)
+        plt.title(f"{key} (smooth={self.smoothing_window}, step={last_step})")
+        plt.plot(sorted_steps, values)
         plt.xfrequency(10)
         plt.xlabel('step')
         plt.show()
@@ -145,12 +158,21 @@ class TensorboardViewer:
                     key = term.inkey(timeout=0.05)
                     if key:
                         self.handle_input(key)
-                        # do not rescan on every key; rescan if file grew
-                        self.scan_event()
                     else:
-                        # throttled idle scan ~2fps
-                        time.sleep(0.4)
-                        self.scan_event()
+                        # small sleep to avoid busy loop
+                        time.sleep(0.05)
+
+                    # Reload data every 15 seconds if file updated
+                    try:
+                        import os
+                        now = time.time()
+                        if now - self._last_scan_ts >= 15.0:
+                            current_size = os.path.getsize(self.event_path)
+                            current_mtime = os.path.getmtime(self.event_path)
+                            if current_size != self._last_scan_size or current_mtime != self._last_seen_mtime:
+                                self.scan_event()
+                    except Exception as e:
+                        self.log(f'failed to check file update: {e}', WARN)
                     self._frame_count += 1
                     if self._profile_enabled:
                         dt = time.perf_counter() - frame_start
