@@ -34,6 +34,7 @@ class TensorboardViewer:
         self.smoothing_window = self.smoothing_levels[self.smoothing_index]
         self.x_axis_modes = ['step', 'relative', 'absolute']
         self.x_mode_index = 0
+        self.series_colors = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan']
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
@@ -158,7 +159,7 @@ class TensorboardViewer:
         xlabel = 'step'
         custom_ticks = None
         custom_labels = None
-        for run_tag, path in zip(self.run_tags, self.event_paths):
+        for idx, (run_tag, path) in enumerate(zip(self.run_tags, self.event_paths)):
             per_run_records = self.records_by_run.get(run_tag, {})
             if key not in per_run_records:
                 continue
@@ -203,10 +204,11 @@ class TensorboardViewer:
                             xlabel = 'time since start (h)'
                             fmt = '{:.1f}'
                         x_vals = [r / divisor for r in rel]
+            color = self.series_colors[idx % len(self.series_colors)]
             try:
-                plt.plot(x_vals, values, label=str(run_tag))
+                plt.plot(x_vals, values, label=str(run_tag), color=color)
             except Exception:
-                plt.plot(x_vals, values)
+                plt.plot(x_vals, values, color=color)
             any_series = True
             if sorted_steps:
                 last_step = sorted_steps[-1]
