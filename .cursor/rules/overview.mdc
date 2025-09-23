@@ -1,0 +1,50 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+## Overview
+
+This repository contains a Python CLI tool for terminal-based viewing of TensorBoard event logs.
+
+- Entry point: `tbview/cli.py` (installed via `setup.py` entry_points)
+- Core logic: `tbview/parser.py` and `tbview/viewer.py`
+- UI components: `tbview/dashing_lib/`
+- TensorFlow protobufs: `tbview/tf_protobuf/` (generated modules)
+- CRC utilities: `tbview/crc32c.py`
+
+Target Python: 3.8+ (keep compatibility unless explicitly changing).
+
+## Basic rules
+
+- Functionality and design
+  - Prefer small, focused functions and early returns
+  - Add concise docstrings for public functions, modules, and CLI commands
+  - Avoid broad exceptions; handle errors explicitly and surface clear messages
+
+- CLI behavior (`tbview/cli.py`)
+  - Add flags with descriptive names and `--help` text; do not break existing defaults
+  - Keep user-facing output stable; guard verbose/debug logs behind a flag
+
+- Performance and memory
+  - Stream and iterate over event files; avoid loading entire logs into memory
+  - Reuse buffers where possible and prefer generators over large lists
+
+- Dependencies
+  - Minimize new dependencies; if required, add to `setup.py` `install_requires`
+  - Pin minimal compatible versions only when necessary for correctness
+
+- File placement
+  - Parsing and reading logic: `tbview/parser.py`
+  - View/UI widgets and layout: `tbview/dashing_lib/`
+  - Protobuf updates: regenerate into `tbview/tf_protobuf/` and commit generated files
+
+- Documentation
+  - Update `README.md` when adding user-facing flags, commands, or workflows
+  - Include short usage examples for new features
+
+- Editor and automation
+  - Preserve existing indentation and formatting; do not mix tabs and spaces
+  - Do not introduce trailing spaces or unnecessary reformatting
+  - When adding code via AI, include only necessary imports and keep diffs tight

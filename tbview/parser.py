@@ -24,4 +24,3 @@ def read_records(file_path):
             event = Event()
             event.ParseFromString(event_raw)
             yield event
-            
