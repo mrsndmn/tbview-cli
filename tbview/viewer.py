@@ -21,13 +21,16 @@ class TensorboardViewer:
         self.tag_selector = SelectionTile(
                     options= [],
                     current=0,
-                    title=' Tags List', 
+                    title=' Tags List',
                     border_color=15,
                 )
+        self.smoothing_levels = [0, 10, 50, 100, 200]
+        self.smoothing_index = 0
+        self.smoothing_window = self.smoothing_levels[self.smoothing_index]
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Ctrl+C to quit.", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Ctrl+C to quit.\n\n 4.Press 's' to toggle smoothing (0/5/10/20).", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -45,7 +48,7 @@ class TensorboardViewer:
         self._last_fps_log = 0.0
         self.scan_event(initial=True)
 
-    
+
     def scan_event(self, initial=False):
         import os, time
         start_ts = time.perf_counter()
@@ -64,7 +67,7 @@ class TensorboardViewer:
                     self.records[value.tag][event.step] = value.simple_value
             self._last_offset = end_off
         self._last_scan_size = current_size
-        
+
         self.tag_selector.options = [
             f'[{i+1}] {root_tag} '
             for i, root_tag in enumerate(self.records)
@@ -76,12 +79,16 @@ class TensorboardViewer:
         if key is None:
             return
         if key.is_sequence:
-            pass 
-        else: 
+            pass
+        else:
             if key.isdigit():
-                digit = int(key)  
+                digit = int(key)
                 if digit > 0 and digit <= len(self.tag_selector.options):
                     self.tag_selector.current = digit - 1
+            elif str(key).lower() == 's':
+                self.smoothing_index = (self.smoothing_index + 1) % len(self.smoothing_levels)
+                self.smoothing_window = self.smoothing_levels[self.smoothing_index]
+                self.log(f'smoothing set to {self.smoothing_window}', INFO)
 
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
@@ -99,13 +106,29 @@ class TensorboardViewer:
         key = keys[safe_idx]
         steps = list(self.records[key].keys())
         values = list(self.records[key].values())
-        plt.title(key)
+        if self.smoothing_window and self.smoothing_window > 1:
+            values = self._moving_average(values, self.smoothing_window)
+        plt.title(f"{key} (smooth={self.smoothing_window})")
         plt.plot(steps, values)
         plt.xfrequency(10)
         plt.xlabel('step')
         plt.show()
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
+
+    def _moving_average(self, values, window):
+        if window <= 1 or not values:
+            return values
+        prefix = [0.0]
+        for v in values:
+            prefix.append(prefix[-1] + float(v))
+        smoothed = []
+        for i in range(len(values)):
+            start = max(0, i - window + 1)
+            total = prefix[i + 1] - prefix[start]
+            count = i - start + 1
+            smoothed.append(total / count)
+        return smoothed
 
     def run(self):
         term = self.term

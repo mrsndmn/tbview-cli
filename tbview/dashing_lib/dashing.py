@@ -65,10 +65,10 @@ class Tile(object):
         # top border
         if self.title is None:
             print(
-                tbox.t.color(self.border_color) 
-                + tbox.t.move(tbox.x, tbox.y) 
-                + border_tl 
-                + border_h * (tbox.w - 2) 
+                tbox.t.color(self.border_color)
+                + tbox.t.move(tbox.x, tbox.y)
+                + border_tl
+                + border_h * (tbox.w - 2)
                 + border_tr
             )
         else:
@@ -80,8 +80,8 @@ class Tile(object):
                 + border_tr
             top_str = top_str[:margin] + col + title + top_str[margin+len(title):]
             print(
-                tbox.t.color(self.border_color) 
-                + tbox.t.move(tbox.x, tbox.y) 
+                tbox.t.color(self.border_color)
+                + tbox.t.move(tbox.x, tbox.y)
                 + top_str
             )
 
@@ -263,7 +263,7 @@ class Log(Tile):
         if i < tbox.h:
             for i2 in range(i + 1, tbox.h):
                 print(tbox.t.move(tbox.x + i2, tbox.y) + " " * tbox.w)
-    
+
     def logs_wrapped(self, w):
         res = []
         for log in self.logs:
