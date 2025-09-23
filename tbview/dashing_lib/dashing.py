@@ -136,7 +136,7 @@ class Tile(object):
         tbox = TBox(t, 0, 0, t.width, t.height - 1)
         self._display(tbox, None)
         # park cursor in a safe place and reset color
-        print(t.move(t.height - 3, 0) + t.color(0))
+        print(t.move(t.height - 3, 0) + t.normal)
 
     def _draw_title(self, tbox, fill_all_width):
         if not self.title:
