@@ -27,10 +27,12 @@ class TensorboardViewer:
         self.smoothing_levels = [0, 10, 50, 100, 200]
         self.smoothing_index = 0
         self.smoothing_window = self.smoothing_levels[self.smoothing_index]
+        self.x_axis_modes = ['step', 'relative', 'absolute']
+        self.x_mode_index = 0
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Ctrl+C to quit.\n\n 4.Press 's' to toggle smoothing (0/10/50/100/200).", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Ctrl+C to quit.\n\n 4.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 5.Press 'x' to toggle X axis (step/rel/abs).", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -49,6 +51,7 @@ class TensorboardViewer:
         import os, time
         self._last_seen_mtime = os.path.getmtime(self.event_path)
         self._last_scan_ts = time.time()
+        self.wall_times = {}
         self.scan_event(initial=True)
 
 
@@ -67,7 +70,10 @@ class TensorboardViewer:
                     # print(value.tag, value.simple_value, event.step)
                     if value.tag not in self.records:
                         self.records[value.tag] = {}
+                    if value.tag not in self.wall_times:
+                        self.wall_times[value.tag] = {}
                     self.records[value.tag][event.step] = value.simple_value
+                    self.wall_times[value.tag][event.step] = getattr(event, 'wall_time', None)
             self._last_offset = end_off
         self._last_scan_size = current_size
         self._last_seen_mtime = os.path.getmtime(self.event_path)
@@ -94,6 +100,9 @@ class TensorboardViewer:
                 self.smoothing_index = (self.smoothing_index + 1) % len(self.smoothing_levels)
                 self.smoothing_window = self.smoothing_levels[self.smoothing_index]
                 self.log(f'smoothing set to {self.smoothing_window}', INFO)
+            elif str(key).lower() == 'x':
+                self.x_mode_index = (self.x_mode_index + 1) % len(self.x_axis_modes)
+                self.log(f"X axis set to {self.x_axis_modes[self.x_mode_index]}", INFO)
 
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
@@ -121,10 +130,86 @@ class TensorboardViewer:
             last_step = None
         if self.smoothing_window and self.smoothing_window > 1:
             values = self._moving_average(values, self.smoothing_window)
-        plt.title(f"{key} (smooth={self.smoothing_window}, step={last_step})")
-        plt.plot(sorted_steps, values)
+        # choose X axis values with adaptive time formatting
+        x_mode = self.x_axis_modes[self.x_mode_index]
+        custom_ticks = None
+        custom_labels = None
+        xlabel = 'step'
+        if x_mode == 'step' or not steps:
+            x_vals = sorted_steps
+            xlabel = 'step'
+            if x_vals:
+                tick_count = max(2, min(10, len(x_vals)))
+                step_idx = max(1, len(x_vals) // tick_count)
+                idxs = list(range(0, len(x_vals), step_idx))
+                if idxs[-1] != len(x_vals) - 1:
+                    idxs.append(len(x_vals) - 1)
+                custom_ticks = [x_vals[i] for i in idxs]
+                custom_labels = [str(x_vals[i]) for i in idxs]
+        else:
+            times = [self.wall_times.get(key, {}).get(s) for s in sorted_steps]
+            if any(t is None for t in times):
+                x_vals = sorted_steps
+                xlabel = 'step'
+                if x_vals:
+                    tick_count = max(2, min(10, len(x_vals)))
+                    step_idx = max(1, len(x_vals) // tick_count)
+                    idxs = list(range(0, len(x_vals), step_idx))
+                    if idxs[-1] != len(x_vals) - 1:
+                        idxs.append(len(x_vals) - 1)
+                    custom_ticks = [x_vals[i] for i in idxs]
+                    custom_labels = [str(x_vals[i]) for i in idxs]
+            else:
+                if x_mode == 'absolute':
+                    # Use epoch seconds for x, label ticks as HH:MM and include start day in xlabel
+                    x_vals = times
+                    from datetime import datetime
+                    import time as _time
+                    start_dt = datetime.fromtimestamp(times[0])
+                    start_day = start_dt.strftime('%d/%m')
+                    xlabel = f'time HH:MM (start {start_day})'
+                    tick_count = max(2, min(10, len(x_vals)))
+                    step_idx = max(1, len(x_vals) // tick_count)
+                    idxs = list(range(0, len(x_vals), step_idx))
+                    if idxs[-1] != len(x_vals) - 1:
+                        idxs.append(len(x_vals) - 1)
+                    custom_ticks = [x_vals[i] for i in idxs]
+                    custom_labels = [_time.strftime('%H:%M', _time.localtime(x_vals[i])) for i in idxs]
+                else:
+                    # Relative time: adapt units to seconds/minutes/hours and set ticks
+                    t0 = times[0]
+                    rel = [t - t0 for t in times]
+                    total = rel[-1] if rel else 0
+                    if total < 60:
+                        divisor = 1.0
+                        xlabel = 'time since start (s)'
+                        fmt = '{:.0f}'
+                    elif total < 3600:
+                        divisor = 60.0
+                        xlabel = 'time since start (min)'
+                        fmt = '{:.1f}'
+                    else:
+                        divisor = 3600.0
+                        xlabel = 'time since start (h)'
+                        fmt = '{:.1f}'
+                    x_vals = [r / divisor for r in rel]
+                    if x_vals:
+                        tick_count = max(2, min(10, len(x_vals)))
+                        step_idx = max(1, len(x_vals) // tick_count)
+                        idxs = list(range(0, len(x_vals), step_idx))
+                        if idxs[-1] != len(x_vals) - 1:
+                            idxs.append(len(x_vals) - 1)
+                        custom_ticks = [x_vals[i] for i in idxs]
+                        custom_labels = [fmt.format(x_vals[i]) for i in idxs]
+        plt.title(f"{key} (smooth={self.smoothing_window}, last_step={last_step})")
+        plt.plot(x_vals, values)
+        if custom_ticks is not None and custom_labels is not None:
+            try:
+                plt.xticks(custom_ticks, custom_labels)
+            except Exception:
+                pass
         plt.xfrequency(10)
-        plt.xlabel('step')
+        plt.xlabel(xlabel)
         plt.show()
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
