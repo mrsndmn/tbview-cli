@@ -9,7 +9,7 @@ setup(
     packages = ['tbview'],
     exclude_package_data = {'': ['assets/*']},
     install_requires= [
-        'asciichartpy',
+        'plotext',
         'blessed',
         'inquirer',
         'protobuf==3.20.1',

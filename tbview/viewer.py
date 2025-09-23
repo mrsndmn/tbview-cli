@@ -1,12 +1,11 @@
 from tbview.dashing_lib.layout import RatioHSplit, RatioVSplit
 from tbview.dashing_lib.widgets import PlotextTile, SelectionTile
 from tbview.dashing_lib import *
+import plotext as plt
 from time import sleep
 import blessed
 from tbview.parser import read_records
 from collections import OrderedDict
-import math
-import asciichartpy as ac
 
 ERROR = '[ERROR]'
 WARN = '[WARN]'
@@ -22,7 +21,7 @@ class TensorboardViewer:
         self.tag_selector = SelectionTile(
                     options= [],
                     current=0,
-                    title=' Tags List',
+                    title=' Tags List', 
                     border_color=15,
                 )
         self.ui = RatioHSplit(
@@ -41,7 +40,7 @@ class TensorboardViewer:
         self.records = OrderedDict()
         self.scan_event()
 
-
+    
     def scan_event(self):
         for event in read_records(self.event_path):
             summary = event.summary
@@ -51,7 +50,7 @@ class TensorboardViewer:
                     if value.tag not in self.records:
                         self.records[value.tag] = {}
                     self.records[value.tag][event.step] = value.simple_value
-
+        
         self.tag_selector.options = [
             f'[{i+1}] {root_tag} '
             for i, root_tag in enumerate(self.records)
@@ -61,10 +60,10 @@ class TensorboardViewer:
         if key is None:
             return
         if key.is_sequence:
-            pass
-        else:
+            pass 
+        else: 
             if key.isdigit():
-                digit = int(key)
+                digit = int(key)  
                 if digit > 0 and digit <= len(self.tag_selector.options):
                     self.tag_selector.current = digit - 1
 
@@ -72,27 +71,15 @@ class TensorboardViewer:
         self.logger.append(self.term.white(f'{level} {msg}'))
 
     def plot(self, tbox):
-        if not self.records:
-            print('No scalar data found')
-            return
+        plt.theme('clear')
+        plt.cld()
+        plt.plot_size(tbox.w, tbox.h)
         key = list(self.records.keys())[self.tag_selector.current]
-
-        steps = sorted(self.records[key].keys())
-        values = [self.records[key][s] for s in steps]
-
-        # Downsample to fit width of the inner plotting area
-        max_columns = max(1, tbox.w - 10)
-        if len(values) > max_columns:
-            stride = math.ceil(len(values) / max_columns)
-            values = values[::stride]
-
-        height = max(3, tbox.h - 10)
-        config = {
-            'height': height,
-        }
-
-        print(key)
-        print(ac.plot(values, config))
+        plt.title(key)
+        plt.plot(self.records[key].keys(), self.records[key].values())
+        plt.xfrequency(10)
+        plt.xlabel('step')
+        plt.show()
 
     def run(self):
         term = self.term
