@@ -75,7 +75,8 @@ def run_main(args):
                 root, file, _size, _disp = target_options[idx]
                 ev_path = os.path.abspath(os.path.join(root, file))
                 ev_name = local_event_name(file)
-                ev_dir = local_event_dir(root)
+
+                ev_dir = root.replace(path, '').lstrip(os.sep)
                 ev_tag = ev_dir if ev_dir is not None else ev_name
                 selected_event_paths.append(ev_path)
                 selected_event_tags.append(ev_tag)

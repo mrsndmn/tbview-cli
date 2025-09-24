@@ -80,7 +80,11 @@ class TensorboardViewer:
             if not initial and current_size == self._last_scan_size_by_run.get(run_tag, 0):
                 continue
             # Incremental read per run
-            for event, end_off in read_records_from_offset(path, self._last_offset_by_run.get(run_tag, 0)):
+            for event, end_off in read_records_from_offset(
+                path,
+                self._last_offset_by_run.get(run_tag, 0),
+                warn=lambda msg: self.log(msg, WARN)
+            ):
                 summary = event.summary
                 for value in summary.value:
                     if value.HasField('simple_value'):
