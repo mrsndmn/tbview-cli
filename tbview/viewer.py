@@ -247,36 +247,14 @@ class TensorboardViewer:
                             xlabel = 'time since start (h)'
                             fmt = '{:.1f}'
                         x_vals = [r / divisor for r in rel]
-            # Compute per-run ETA for train/epoch
+            # Compute per-run ETA for train/epoch (always shown in legend if available)
             eta_str = None
-            if key == 'train/epoch':
-                times_abs = [self.wall_times_by_run.get(run_tag, {}).get(key, {}).get(s) for s in sorted_steps]
-                # ensure we have at least a start time
-                if times_abs and times_abs[0] is not None:
-                    t0_abs = times_abs[0]
-                    # Find first index where raw epoch value >= 1
-                    idx_ge1 = None
-                    for ii, v in enumerate(raw_values):
-                        if v is not None and v >= 1.0 and times_abs[ii] is not None:
-                            idx_ge1 = ii
-                            break
-                    eta_sec = None
-                    if idx_ge1 is not None:
-                        eta_sec = max(0.0, float(times_abs[idx_ge1] - t0_abs))
-                    else:
-                        # Use latest valid point to estimate
-                        last_idx = None
-                        for ii in range(len(raw_values) - 1, -1, -1):
-                            if raw_values[ii] is not None and times_abs[ii] is not None and raw_values[ii] > 0:
-                                last_idx = ii
-                                break
-                        if last_idx is not None:
-                            frac = float(raw_values[last_idx])
-                            t_rel = float(times_abs[last_idx] - t0_abs)
-                            if frac > 0:
-                                eta_sec = t_rel * (1.0 / frac)
-                    if eta_sec is not None:
-                        eta_str = self._format_duration(eta_sec)
+            try:
+                eta_sec = self._compute_run_epoch_eta(run_tag)
+                if eta_sec is not None:
+                    eta_str = self._format_duration(eta_sec)
+            except Exception:
+                eta_str = None
 
             color = self.series_colors[idx % len(self.series_colors)]
             try:
@@ -395,6 +373,50 @@ class TensorboardViewer:
             return f"{h}:{m:02d}:{s:02d}"
         else:
             return f"{m:02d}:{s:02d}"
+
+    def _compute_run_epoch_eta(self, run_tag):
+        per_run_records = self.records_by_run.get(run_tag, {})
+        if 'train/epoch' not in per_run_records:
+            return None
+        epoch_series = per_run_records['train/epoch']
+        if not epoch_series:
+            return None
+        steps = sorted(epoch_series.keys())
+        values = [epoch_series[s] for s in steps]
+        times_map = self.wall_times_by_run.get(run_tag, {}).get('train/epoch', {})
+        times_abs = [times_map.get(s) for s in steps]
+        if not times_abs or times_abs[0] is None:
+            return None
+        t0_abs = times_abs[0]
+        # Find first index where epoch >= 1
+        idx_ge1 = None
+        for i, (v, t) in enumerate(zip(values, times_abs)):
+            try:
+                if v is not None and float(v) >= 1.0 and t is not None:
+                    idx_ge1 = i
+                    break
+            except Exception:
+                continue
+        if idx_ge1 is not None:
+            return max(0.0, float(times_abs[idx_ge1] - t0_abs))
+        # Otherwise use last valid point for projection
+        last_idx = None
+        for i in range(len(values) - 1, -1, -1):
+            v = values[i]
+            t = times_abs[i]
+            try:
+                if v is not None and float(v) > 0 and t is not None:
+                    last_idx = i
+                    break
+            except Exception:
+                continue
+        if last_idx is None:
+            return None
+        frac = float(values[last_idx])
+        t_rel = float(times_abs[last_idx] - t0_abs)
+        if frac <= 0:
+            return None
+        return max(0.0, t_rel * (1.0 / frac))
 
     def run(self):
         term = self.term
