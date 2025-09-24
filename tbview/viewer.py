@@ -35,10 +35,13 @@ class TensorboardViewer:
         self.x_axis_modes = ['step', 'relative', 'absolute']
         self.x_mode_index = 0
         self.series_colors = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan']
+        self._xlim_steps = None  # tuple (start_step, end_step) or None
+        self._awaiting_xlim_input = False
+        self._xlim_input_buffer = ''
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim as steps (start:end).", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -119,6 +122,26 @@ class TensorboardViewer:
     def handle_input(self, key):
         if key is None:
             return
+        # Handle xlim interactive input mode
+        if self._awaiting_xlim_input:
+            # Accept digits, colon, minus, backspace, enter
+            if key.is_sequence:
+                name = getattr(key, 'name', '')
+                if name in ('KEY_BACKSPACE', 'KEY_DELETE'):
+                    if self._xlim_input_buffer:
+                        self._xlim_input_buffer = self._xlim_input_buffer[:-1]
+                elif name in ('KEY_ENTER',):
+                    self._finalize_xlim_input()
+                else:
+                    pass
+            else:
+                ch = str(key)
+                if ch in ('\n', '\r'):
+                    self._finalize_xlim_input()
+                elif ch.isprintable():
+                    self._xlim_input_buffer += ch
+            return
+
         if key.is_sequence:
             pass
         else:
@@ -135,6 +158,10 @@ class TensorboardViewer:
                 self.log(f"X axis set to {self.x_axis_modes[self.x_mode_index]}", INFO)
             elif str(key).lower() == 'q':
                 self._quit_and_reselect = True
+            elif str(key).lower() == 'l':
+                self._awaiting_xlim_input = True
+                self._xlim_input_buffer = ''
+                self.log("Enter xlim in steps as start:end, empty to clear, then press Enter", INFO)
 
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
@@ -163,6 +190,9 @@ class TensorboardViewer:
         xlabel = 'step'
         custom_ticks = None
         custom_labels = None
+        global_last_step = None
+        global_xlim_min = None
+        global_xlim_max = None
         for idx, (run_tag, path) in enumerate(zip(self.run_tags, self.event_paths)):
             per_run_records = self.records_by_run.get(run_tag, {})
             if key not in per_run_records:
@@ -215,11 +245,31 @@ class TensorboardViewer:
                 plt.plot(x_vals, values, color=color)
             any_series = True
             if sorted_steps:
-                last_step = sorted_steps[-1]
+                s_last = sorted_steps[-1]
+                if global_last_step is None or s_last > global_last_step:
+                    global_last_step = s_last
+
+            # Compute desired axis-space xlim from step-based limits without filtering
+            if self._xlim_steps is not None:
+                start_s, end_s = self._xlim_steps
+                if x_mode == 'step' or not sorted_steps:
+                    # Will set directly after loop
+                    pass
+                else:
+                    # Map steps within [start:end] to current axis x values
+                    selected_x = [x for s, x in zip(sorted_steps, x_vals) if (s >= start_s and s <= end_s)]
+                    if selected_x:
+                        run_min = min(selected_x)
+                        run_max = max(selected_x)
+                        if global_xlim_min is None or run_min < global_xlim_min:
+                            global_xlim_min = run_min
+                        if global_xlim_max is None or run_max > global_xlim_max:
+                            global_xlim_max = run_max
 
         if not any_series:
             return
 
+        last_step = global_last_step
         plt.title(f"{key} (smooth={self.smoothing_window}, last_step={last_step})")
         try:
             plt.legend(True)
@@ -227,9 +277,48 @@ class TensorboardViewer:
             pass
         plt.xfrequency(10)
         plt.xlabel(xlabel)
+        # Apply xlim after plotting
+        if self._xlim_steps is not None:
+            start_s, end_s = self._xlim_steps
+            if x_mode == 'step':
+                try:
+                    plt.xlim(start_s, end_s)
+                except Exception:
+                    self.log(f'failed to set xlim for steps: {global_xlim_min} {global_xlim_max}', WARN)
+                    pass
+            else:
+                if global_xlim_min is not None and global_xlim_max is not None:
+                    try:
+                        plt.xlim(global_xlim_min, global_xlim_max)
+                    except Exception:
+                        self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}', WARN)
+                        pass
         plt.show()
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
+
+    def _finalize_xlim_input(self):
+        raw = (self._xlim_input_buffer or '').strip()
+        self._awaiting_xlim_input = False
+        self._xlim_input_buffer = ''
+        if raw == '':
+            self._xlim_steps = None
+            self.log('xlim cleared', INFO)
+            return
+        try:
+            if ':' in raw:
+                start_s, end_s = raw.split(':', 1)
+                start_v = int(start_s.strip())
+                end_v = int(end_s.strip())
+            else:
+                start_v = 0
+                end_v = int(raw)
+            if start_v > end_v:
+                start_v, end_v = end_v, start_v
+            self._xlim_steps = (start_v, end_v)
+            self.log(f'set xlim (steps) to {self._xlim_steps[0]}:{self._xlim_steps[1]}', INFO)
+        except Exception as e:
+            self.log(f'failed to parse xlim: {e}', WARN)
 
     def _moving_average(self, values, window):
         if window <= 1 or not values:
