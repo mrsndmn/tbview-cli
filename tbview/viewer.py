@@ -247,20 +247,34 @@ class TensorboardViewer:
                             xlabel = 'time since start (h)'
                             fmt = '{:.1f}'
                         x_vals = [r / divisor for r in rel]
-            # Compute per-run ETA for train/epoch (always shown in legend if available)
+            # Compute per-run ETA and speed (steps/s) using train/epoch, always show if available
             eta_str = None
+            speed_str = None
             try:
-                eta_sec = self._compute_run_epoch_eta(run_tag)
+                eta_sec, steps_per_sec = self._compute_run_epoch_eta(run_tag)
                 if eta_sec is not None:
                     eta_str = self._format_duration(eta_sec)
+                if steps_per_sec is not None and steps_per_sec > 0:
+                    if steps_per_sec > 10:
+                        speed_str = f"{steps_per_sec:.1f} steps/s"
+                    elif steps_per_sec > 1:
+                        speed_str = f"{steps_per_sec:.2f} steps/s"
+                    else:
+                        speed_str = f"{steps_per_sec:.4f} step/s"
             except Exception:
                 eta_str = None
+                speed_str = None
 
             color = self.series_colors[idx % len(self.series_colors)]
             try:
                 plot_label = str(run_tag)
+                extra_parts = []
                 if eta_str is not None:
-                    plot_label = f"{plot_label} (eta {eta_str})"
+                    extra_parts.append(f"eta {eta_str}")
+                if speed_str is not None:
+                    extra_parts.append(speed_str)
+                if extra_parts:
+                    plot_label = f"{plot_label} (" + ", ".join(extra_parts) + ")"
                 plt.plot(x_vals, values, label=plot_label, color=color)
             except Exception:
                 plt.plot(x_vals, values, color=color)
@@ -398,7 +412,12 @@ class TensorboardViewer:
             except Exception:
                 continue
         if idx_ge1 is not None:
-            return max(0.0, float(times_abs[idx_ge1] - t0_abs))
+            eta = max(0.0, float(times_abs[idx_ge1] - t0_abs))
+            # Compute speed: steps per second using last observed step and time window
+            steps_elapsed = float(steps[idx_ge1] - steps[0]) if len(steps) > 0 else 0.0
+            time_elapsed = float(times_abs[idx_ge1] - t0_abs)
+            speed = (steps_elapsed / time_elapsed) if time_elapsed > 0 else None
+            return eta, speed
         # Otherwise use last valid point for projection
         last_idx = None
         for i in range(len(values) - 1, -1, -1):
@@ -414,9 +433,14 @@ class TensorboardViewer:
             return None
         frac = float(values[last_idx])
         t_rel = float(times_abs[last_idx] - t0_abs)
+        # Compute speed using steps and duration till last_idx
+        steps_elapsed = float(steps[last_idx] - steps[0]) if len(steps) > 0 else 0.0
+        time_elapsed = float(times_abs[last_idx] - t0_abs)
+        speed = (steps_elapsed / time_elapsed) if time_elapsed > 0 else None
         if frac <= 0:
             return None
-        return max(0.0, t_rel * (1.0 / frac))
+        eta = max(0.0, t_rel * (1.0 / frac))
+        return eta, speed
 
     def run(self):
         term = self.term
