@@ -41,7 +41,7 @@ class TensorboardViewer:
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim as steps (start:end).", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim in steps (start:end), ESC to cancel.", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -130,8 +130,13 @@ class TensorboardViewer:
                 if name in ('KEY_BACKSPACE', 'KEY_DELETE'):
                     if self._xlim_input_buffer:
                         self._xlim_input_buffer = self._xlim_input_buffer[:-1]
+                    self._render_xlim_prompt()
                 elif name in ('KEY_ENTER',):
                     self._finalize_xlim_input()
+                elif name in ('KEY_ESCAPE',):
+                    self._awaiting_xlim_input = False
+                    self._xlim_input_buffer = ''
+                    self.log('xlim input cancelled', INFO)
                 else:
                     pass
             else:
@@ -140,6 +145,7 @@ class TensorboardViewer:
                     self._finalize_xlim_input()
                 elif ch.isprintable():
                     self._xlim_input_buffer += ch
+                    self._render_xlim_prompt()
             return
 
         if key.is_sequence:
@@ -161,7 +167,9 @@ class TensorboardViewer:
             elif str(key).lower() == 'l':
                 self._awaiting_xlim_input = True
                 self._xlim_input_buffer = ''
-                self.log("Enter xlim in steps as start:end, empty to clear, then press Enter", INFO)
+                self.log("Enter xlim in steps as start:end (empty to clear). Press Enter to apply.", INFO)
+                # Echo interactive prompt line
+                self._render_xlim_prompt()
 
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
@@ -319,6 +327,12 @@ class TensorboardViewer:
             self.log(f'set xlim (steps) to {self._xlim_steps[0]}:{self._xlim_steps[1]}', INFO)
         except Exception as e:
             self.log(f'failed to parse xlim: {e}', WARN)
+
+    def _render_xlim_prompt(self):
+        try:
+            self.logger.replace_last(self.term.white(f"{INFO} Enter xlim in steps as start:end (ESC to cancel): {self._xlim_input_buffer}"))
+        except Exception:
+            pass
 
     def _moving_average(self, values, window):
         if window <= 1 or not values:

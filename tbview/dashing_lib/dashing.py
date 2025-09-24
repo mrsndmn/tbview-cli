@@ -280,6 +280,12 @@ class Log(Tile):
     def append(self, msg):
         self.logs.append(msg)
 
+    def replace_last(self, msg):
+        try:
+            self.logs[-1] = msg
+        except IndexError:
+            self.logs.append(msg)
+
 
 class HGauge(Tile):
     def __init__(self, label=None, val=100, color=2, **kw):
