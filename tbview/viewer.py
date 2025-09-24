@@ -209,7 +209,8 @@ class TensorboardViewer:
             if not steps:
                 continue
             sorted_steps = sorted(steps)
-            values = [per_run_records[key][s] for s in sorted_steps]
+            raw_values = [per_run_records[key][s] for s in sorted_steps]
+            values = list(raw_values)
             if self.smoothing_window and self.smoothing_window > 1:
                 values = self._moving_average(values, self.smoothing_window)
             # derive x values per series
@@ -246,9 +247,43 @@ class TensorboardViewer:
                             xlabel = 'time since start (h)'
                             fmt = '{:.1f}'
                         x_vals = [r / divisor for r in rel]
+            # Compute per-run ETA for train/epoch
+            eta_str = None
+            if key == 'train/epoch':
+                times_abs = [self.wall_times_by_run.get(run_tag, {}).get(key, {}).get(s) for s in sorted_steps]
+                # ensure we have at least a start time
+                if times_abs and times_abs[0] is not None:
+                    t0_abs = times_abs[0]
+                    # Find first index where raw epoch value >= 1
+                    idx_ge1 = None
+                    for ii, v in enumerate(raw_values):
+                        if v is not None and v >= 1.0 and times_abs[ii] is not None:
+                            idx_ge1 = ii
+                            break
+                    eta_sec = None
+                    if idx_ge1 is not None:
+                        eta_sec = max(0.0, float(times_abs[idx_ge1] - t0_abs))
+                    else:
+                        # Use latest valid point to estimate
+                        last_idx = None
+                        for ii in range(len(raw_values) - 1, -1, -1):
+                            if raw_values[ii] is not None and times_abs[ii] is not None and raw_values[ii] > 0:
+                                last_idx = ii
+                                break
+                        if last_idx is not None:
+                            frac = float(raw_values[last_idx])
+                            t_rel = float(times_abs[last_idx] - t0_abs)
+                            if frac > 0:
+                                eta_sec = t_rel * (1.0 / frac)
+                    if eta_sec is not None:
+                        eta_str = self._format_duration(eta_sec)
+
             color = self.series_colors[idx % len(self.series_colors)]
             try:
-                plt.plot(x_vals, values, label=str(run_tag), color=color)
+                plot_label = str(run_tag)
+                if eta_str is not None:
+                    plot_label = f"{plot_label} (eta {eta_str})"
+                plt.plot(x_vals, values, label=plot_label, color=color)
             except Exception:
                 plt.plot(x_vals, values, color=color)
             any_series = True
@@ -347,6 +382,19 @@ class TensorboardViewer:
             count = i - start + 1
             smoothed.append(total / count)
         return smoothed
+
+    def _format_duration(self, seconds):
+        try:
+            secs = max(0, int(round(seconds)))
+        except Exception:
+            return "?"
+        h = secs // 3600
+        m = (secs % 3600) // 60
+        s = secs % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        else:
+            return f"{m:02d}:{s:02d}"
 
     def run(self):
         term = self.term
