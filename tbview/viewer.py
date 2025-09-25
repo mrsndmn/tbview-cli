@@ -38,10 +38,13 @@ class TensorboardViewer:
         self._xlim_steps = None  # tuple (start_step, end_step) or None
         self._awaiting_xlim_input = False
         self._xlim_input_buffer = ''
+        self._ylim = None  # tuple (ymin, ymax) or None
+        self._awaiting_ylim_input = False
+        self._ylim_input_buffer = ''
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim in steps (start:end), ESC to cancel.", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'm' to toggle X axis (step/rel/abs).\n\n 7.Press 'x' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -122,6 +125,30 @@ class TensorboardViewer:
     def handle_input(self, key):
         if key is None:
             return
+        # Handle ylim interactive input mode
+        if self._awaiting_ylim_input:
+            if key.is_sequence:
+                name = getattr(key, 'name', '')
+                if name in ('KEY_BACKSPACE', 'KEY_DELETE'):
+                    if self._ylim_input_buffer:
+                        self._ylim_input_buffer = self._ylim_input_buffer[:-1]
+                    self._render_ylim_prompt()
+                elif name in ('KEY_ENTER',):
+                    self._finalize_ylim_input()
+                elif name in ('KEY_ESCAPE',):
+                    self._awaiting_ylim_input = False
+                    self._ylim_input_buffer = ''
+                    self.log('ylim input cancelled', INFO)
+                else:
+                    pass
+            else:
+                ch = str(key)
+                if ch in ('\n', '\r'):
+                    self._finalize_ylim_input()
+                elif ch.isprintable():
+                    self._ylim_input_buffer += ch
+                    self._render_ylim_prompt()
+            return
         # Handle xlim interactive input mode
         if self._awaiting_xlim_input:
             # Accept digits, colon, minus, backspace, enter
@@ -159,17 +186,22 @@ class TensorboardViewer:
                 self.smoothing_index = (self.smoothing_index + 1) % len(self.smoothing_levels)
                 self.smoothing_window = self.smoothing_levels[self.smoothing_index]
                 self.log(f'smoothing set to {self.smoothing_window}', INFO)
-            elif str(key).lower() == 'x':
+            elif str(key).lower() == 'm':
                 self.x_mode_index = (self.x_mode_index + 1) % len(self.x_axis_modes)
                 self.log(f"X axis set to {self.x_axis_modes[self.x_mode_index]}", INFO)
             elif str(key).lower() == 'q':
                 self._quit_and_reselect = True
-            elif str(key).lower() == 'l':
+            elif str(key).lower() == 'x':
                 self._awaiting_xlim_input = True
                 self._xlim_input_buffer = ''
                 self.log("Enter xlim in steps as start:end (empty to clear). Press Enter to apply.", INFO)
                 # Echo interactive prompt line
                 self._render_xlim_prompt()
+            elif str(key).lower() == 'y':
+                self._awaiting_ylim_input = True
+                self._ylim_input_buffer = ''
+                self.log("Enter ylim as min:max (empty to clear). Press Enter to apply.", INFO)
+                self._render_ylim_prompt()
 
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
@@ -201,6 +233,10 @@ class TensorboardViewer:
         global_last_step = None
         global_xlim_min = None
         global_xlim_max = None
+        global_ymin = None
+        global_ymax = None
+        global_xmin_step = None
+        global_xmax_step = None
         for idx, (run_tag, path) in enumerate(zip(self.run_tags, self.event_paths)):
             per_run_records = self.records_by_run.get(run_tag, {})
             if key not in per_run_records:
@@ -252,6 +288,7 @@ class TensorboardViewer:
             speed_str = None
             try:
                 eta_sec, steps_per_sec = self._compute_run_epoch_eta(run_tag)
+                # self.log(f'eta_sec: {eta_sec}, steps_per_sec: {steps_per_sec}', DEBUG)
                 if eta_sec is not None:
                     eta_str = self._format_duration(eta_sec)
                 if steps_per_sec is not None and steps_per_sec > 0:
@@ -283,6 +320,20 @@ class TensorboardViewer:
                 s_last = sorted_steps[-1]
                 if global_last_step is None or s_last > global_last_step:
                     global_last_step = s_last
+                # track global x range in step space
+                s_first = sorted_steps[0]
+                if global_xmin_step is None or s_first < global_xmin_step:
+                    global_xmin_step = s_first
+                if global_xmax_step is None or s_last > global_xmax_step:
+                    global_xmax_step = s_last
+            # track global y range for ylim validation
+            if values:
+                vmin = min(values)
+                vmax = max(values)
+                if global_ymin is None or vmin < global_ymin:
+                    global_ymin = vmin
+                if global_ymax is None or vmax > global_ymax:
+                    global_ymax = vmax
 
             # Compute desired axis-space xlim from step-based limits without filtering
             if self._xlim_steps is not None:
@@ -306,29 +357,63 @@ class TensorboardViewer:
 
         last_step = global_last_step
         plt.title(f"{key} (smooth={self.smoothing_window}, last_step={last_step})")
-        try:
-            plt.legend(True)
-        except Exception:
-            pass
         plt.xfrequency(10)
         plt.xlabel(xlabel)
         # Apply xlim after plotting
         if self._xlim_steps is not None:
             start_s, end_s = self._xlim_steps
             if x_mode == 'step':
-                try:
-                    plt.xlim(start_s, end_s)
-                except Exception:
-                    self.log(f'failed to set xlim for steps: {global_xlim_min} {global_xlim_max}', WARN)
-                    pass
+                # clamp to available step range to avoid plotext errors
+                if global_xmin_step is not None and global_xmax_step is not None:
+                    x0 = min(start_s, end_s)
+                    x1 = max(start_s, end_s)
+                    cx0 = max(x0, global_xmin_step)
+                    cx1 = min(x1, global_xmax_step)
+                    if cx1 > cx0:
+                        plt.xlim(cx0, cx1)
+                    else:
+                        self.log('requested xlim is outside data range; ignoring', WARN)
+                        self._xlim_steps = None
+                else:
+                    self.log('no data range available for xlim; ignoring', WARN)
+                    self._xlim_steps = None
             else:
                 if global_xlim_min is not None and global_xlim_max is not None:
-                    try:
-                        plt.xlim(global_xlim_min, global_xlim_max)
-                    except Exception:
-                        self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}', WARN)
-                        pass
-        plt.show()
+                    if global_xlim_max > global_xlim_min:
+                        try:
+                            plt.xlim(global_xlim_min, global_xlim_max)
+                        except Exception as e:
+                            self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}: {e}', WARN)
+                    else:
+                        self.log('computed xlim has non-positive width; ignoring', WARN)
+                else:
+                    # No points within requested range in time-based x axis; clear invalid selection
+                    self.log('requested xlim selects no points in current x mode; clearing', WARN)
+                    self._xlim_steps = None
+        # Apply ylim after plotting
+        if self._ylim is not None:
+            y_min, y_max = self._ylim
+            if global_ymin is not None and global_ymax is not None:
+                a = min(y_min, y_max)
+                b = max(y_min, y_max)
+                cy0 = max(a, global_ymin)
+                cy1 = min(b, global_ymax)
+                if cy1 > cy0:
+                    plt.ylim(cy0, cy1)
+                else:
+                    self.log('requested ylim is outside data range; ignoring', WARN)
+                    self._ylim = None
+            else:
+                self.log('no data range available for ylim; ignoring', WARN)
+                self._ylim = None
+        # Safeguard rendering to avoid crashing the UI on plotting errors
+        try:
+            plt.show()
+        except Exception as e:
+            self.log(f'plot rendering failed: {e}', ERROR)
+            # Clear potentially invalid limits to recover next frame
+            self._xlim_steps = None
+            self._ylim = None
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
 
@@ -350,16 +435,93 @@ class TensorboardViewer:
                 end_v = int(raw)
             if start_v > end_v:
                 start_v, end_v = end_v, start_v
-            self._xlim_steps = (start_v, end_v)
-            self.log(f'set xlim (steps) to {self._xlim_steps[0]}:{self._xlim_steps[1]}', INFO)
+            # Validate against available step range for currently selected tag
+            selected_tag = self._get_selected_tag()
+            gmin, gmax = self._get_global_step_range_for_tag(selected_tag)
+            if gmin is None or gmax is None:
+                self._xlim_steps = None
+                self.log('no data available to apply xlim; ignoring', WARN)
+                return
+            # Clamp to data range
+            cx0 = max(start_v, gmin)
+            cx1 = min(end_v, gmax)
+            if cx1 <= cx0:
+                self._xlim_steps = None
+                self.log('requested xlim is outside data range; ignoring', WARN)
+                return
+            self._xlim_steps = (cx0, cx1)
+            if (cx0, cx1) != (start_v, end_v):
+                self.log(f'clamped xlim (steps) to {cx0}:{cx1}', INFO)
+            else:
+                self.log(f'set xlim (steps) to {cx0}:{cx1}', INFO)
         except Exception as e:
             self.log(f'failed to parse xlim: {e}', WARN)
 
     def _render_xlim_prompt(self):
+        self.logger.replace_last(self.term.white(f"{INFO} Enter xlim in steps as start:end (ESC to cancel): {self._xlim_input_buffer}"))
+
+    def _finalize_ylim_input(self):
+        raw = (self._ylim_input_buffer or '').strip()
+        self._awaiting_ylim_input = False
+        self._ylim_input_buffer = ''
+        if raw == '':
+            self._ylim = None
+            self.log('ylim cleared', INFO)
+            return
         try:
-            self.logger.replace_last(self.term.white(f"{INFO} Enter xlim in steps as start:end (ESC to cancel): {self._xlim_input_buffer}"))
-        except Exception:
-            pass
+            if ':' in raw:
+                start_s, end_s = raw.split(':', 1)
+                y_min = float(start_s.strip())
+                y_max = float(end_s.strip())
+            else:
+                y_min = 0.0
+                y_max = float(raw)
+            if y_min > y_max:
+                y_min, y_max = y_max, y_min
+            self._ylim = (y_min, y_max)
+            self.log(f'set ylim to {self._ylim[0]}:{self._ylim[1]}', INFO)
+        except Exception as e:
+            self.log(f'failed to parse ylim: {e}', WARN)
+
+    def _render_ylim_prompt(self):
+        self.logger.replace_last(self.term.white(f"{INFO} Enter ylim as min:max (ESC to cancel): {self._ylim_input_buffer}"))
+
+    def _get_selected_tag(self):
+        """Return the currently selected tag name or None if unavailable."""
+        # Collect union of tags across runs
+        all_tags = OrderedDict()
+        for run_tag in self.run_tags:
+            for t in self.records_by_run.get(run_tag, {}):
+                all_tags.setdefault(t, None)
+        keys = list(all_tags.keys())
+        if not keys:
+            return None
+        safe_idx = max(0, min(self.tag_selector.current, len(keys)-1))
+        return keys[safe_idx]
+
+    def _get_global_step_range_for_tag(self, tag):
+        """Compute global min/max step across runs for the given tag.
+
+        Returns (min_step, max_step) or (None, None) if no data.
+        """
+        if tag is None:
+            return None, None
+        global_xmin_step = None
+        global_xmax_step = None
+        for run_tag in self.run_tags:
+            per_run_records = self.records_by_run.get(run_tag, {})
+            if tag not in per_run_records:
+                continue
+            steps = list(per_run_records[tag].keys())
+            if not steps:
+                continue
+            s_first = min(steps)
+            s_last = max(steps)
+            if global_xmin_step is None or s_first < global_xmin_step:
+                global_xmin_step = s_first
+            if global_xmax_step is None or s_last > global_xmax_step:
+                global_xmax_step = s_last
+        return global_xmin_step, global_xmax_step
 
     def _moving_average(self, values, window):
         if window <= 1 or not values:
@@ -378,7 +540,8 @@ class TensorboardViewer:
     def _format_duration(self, seconds):
         try:
             secs = max(0, int(round(seconds)))
-        except Exception:
+        except Exception as e:
+            self.log(f'failed to format duration: {e}', WARN)
             return "?"
         h = secs // 3600
         m = (secs % 3600) // 60
@@ -409,7 +572,8 @@ class TensorboardViewer:
                 if v is not None and float(v) >= 1.0 and t is not None:
                     idx_ge1 = i
                     break
-            except Exception:
+            except Exception as e:
+                self.log(f'failed to compute run epoch eta: {e}', WARN)
                 continue
         if idx_ge1 is not None:
             eta = max(0.0, float(times_abs[idx_ge1] - t0_abs))
@@ -427,7 +591,8 @@ class TensorboardViewer:
                 if v is not None and float(v) > 0 and t is not None:
                     last_idx = i
                     break
-            except Exception:
+            except Exception as e:
+                self.log(f'failed to compute run epoch eta: {e}', WARN)
                 continue
         if last_idx is None:
             return None
@@ -439,7 +604,7 @@ class TensorboardViewer:
         speed = (steps_elapsed / time_elapsed) if time_elapsed > 0 else None
         if frac <= 0:
             return None
-        eta = max(0.0, t_rel * (1.0 / frac))
+        eta = max(0.0, t_rel * (1.0 / frac) - time_elapsed)
         return eta, speed
 
     def run(self):

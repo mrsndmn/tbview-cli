@@ -11,6 +11,7 @@ class PlotextTile(Tile):
     def _display(self, tbox, parent):
         tbox = self._draw_borders_and_title(tbox)
         st = self.plot_to_string(TBox(tbox.t, 0, 0, w=tbox.w-4, h=tbox.h-2 ))
+        dx = 0
         for dx, line in enumerate(st.splitlines()):
             print(
                 tbox.t.move(tbox.x + dx + 1, tbox.y + 2)

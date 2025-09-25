@@ -38,25 +38,33 @@ def run_main(args):
             target_event_name = os.path.basename(path)
             target_event_dir = None
     elif os.path.isdir(path):
-        target_options = []
-        for root, dirs, files in os.walk(path):
-            for file in files:
-                if is_event_file(file):
-                    size = os.path.getsize(os.path.join(root, file))
-
-                    display_path_no_prefix = root.replace(path, '').lstrip(os.sep)
-                    target_options.append((root, file, size, display_path_no_prefix))
-        if len(target_options) == 0:
-            raise RuntimeError(f"No event file found in directory {path}")
-        target_options = sorted(target_options, key=lambda x:x[1], reverse=True)
-        options = [f'[{i}] {op[3]}/{local_event_name(op[1])}' for i, op in enumerate(target_options)]
-
-        # Loop to support going back from viewer with 'q'
+        # Loop to support going back from viewer with 'q' and refreshing available logs
+        previously_selected = set()
         while True:
+            target_options = []
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if is_event_file(file):
+                        size = os.path.getsize(os.path.join(root, file))
+                        display_path_no_prefix = root.replace(path, '').lstrip(os.sep)
+                        target_options.append((root, file, size, display_path_no_prefix))
+            if len(target_options) == 0:
+                raise RuntimeError(f"No event file found in directory {path}")
+            target_options = sorted(target_options, key=lambda x:x[1], reverse=True)
+            options = [f'[{i}] {op[3]}/{local_event_name(op[1])}' for i, op in enumerate(target_options)]
+            # Pre-select previously chosen items if returning from viewer
+            default_selected = []
+            if previously_selected:
+                for i, op in enumerate(target_options):
+                    root, file, _size, _disp = op
+                    if (root, file) in previously_selected:
+                        default_selected.append(options[i])
+
             questions = [
                 inquirer.Checkbox('choices',
                                    message="Select one or more event files (space to toggle, enter to view)",
                                    choices=options,
+                                   default=default_selected if default_selected else None,
                                    carousel=True,
                                    )
             ]
@@ -85,6 +93,11 @@ def run_main(args):
             should_reselect = tbviewer.run()
             if not should_reselect:
                 return
+            # Remember selected items for next loop iteration
+            previously_selected = set()
+            for idx in selected_indices:
+                root, file, _size, _disp = target_options[idx]
+                previously_selected.add((root, file))
     
     target_event_tag = target_event_name if target_event_dir is None else target_event_dir
 
