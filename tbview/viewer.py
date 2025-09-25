@@ -38,10 +38,13 @@ class TensorboardViewer:
         self._xlim_steps = None  # tuple (start_step, end_step) or None
         self._awaiting_xlim_input = False
         self._xlim_input_buffer = ''
+        self._ylim = None  # tuple (ymin, ymax) or None
+        self._awaiting_ylim_input = False
+        self._ylim_input_buffer = ''
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim in steps (start:end), ESC to cancel.", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -122,6 +125,30 @@ class TensorboardViewer:
     def handle_input(self, key):
         if key is None:
             return
+        # Handle ylim interactive input mode
+        if self._awaiting_ylim_input:
+            if key.is_sequence:
+                name = getattr(key, 'name', '')
+                if name in ('KEY_BACKSPACE', 'KEY_DELETE'):
+                    if self._ylim_input_buffer:
+                        self._ylim_input_buffer = self._ylim_input_buffer[:-1]
+                    self._render_ylim_prompt()
+                elif name in ('KEY_ENTER',):
+                    self._finalize_ylim_input()
+                elif name in ('KEY_ESCAPE',):
+                    self._awaiting_ylim_input = False
+                    self._ylim_input_buffer = ''
+                    self.log('ylim input cancelled', INFO)
+                else:
+                    pass
+            else:
+                ch = str(key)
+                if ch in ('\n', '\r'):
+                    self._finalize_ylim_input()
+                elif ch.isprintable():
+                    self._ylim_input_buffer += ch
+                    self._render_ylim_prompt()
+            return
         # Handle xlim interactive input mode
         if self._awaiting_xlim_input:
             # Accept digits, colon, minus, backspace, enter
@@ -170,6 +197,11 @@ class TensorboardViewer:
                 self.log("Enter xlim in steps as start:end (empty to clear). Press Enter to apply.", INFO)
                 # Echo interactive prompt line
                 self._render_xlim_prompt()
+            elif str(key).lower() == 'y':
+                self._awaiting_ylim_input = True
+                self._ylim_input_buffer = ''
+                self.log("Enter ylim as min:max (empty to clear). Press Enter to apply.", INFO)
+                self._render_ylim_prompt()
 
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
@@ -252,7 +284,7 @@ class TensorboardViewer:
             speed_str = None
             try:
                 eta_sec, steps_per_sec = self._compute_run_epoch_eta(run_tag)
-                self.log(f'eta_sec: {eta_sec}, steps_per_sec: {steps_per_sec}', DEBUG)
+                # self.log(f'eta_sec: {eta_sec}, steps_per_sec: {steps_per_sec}', DEBUG)
                 if eta_sec is not None:
                     eta_str = self._format_duration(eta_sec)
                 if steps_per_sec is not None and steps_per_sec > 0:
@@ -325,6 +357,14 @@ class TensorboardViewer:
                     except Exception as e:
                         self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}: {e}', WARN)
                         pass
+        # Apply ylim after plotting
+        if self._ylim is not None:
+            y_min, y_max = self._ylim
+            try:
+                plt.ylim(y_min, y_max)
+            except Exception as e:
+                self.log(f'failed to set ylim {y_min} {y_max}: {e}', WARN)
+                pass
         plt.show()
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
@@ -353,11 +393,33 @@ class TensorboardViewer:
             self.log(f'failed to parse xlim: {e}', WARN)
 
     def _render_xlim_prompt(self):
+        self.logger.replace_last(self.term.white(f"{INFO} Enter xlim in steps as start:end (ESC to cancel): {self._xlim_input_buffer}"))
+
+    def _finalize_ylim_input(self):
+        raw = (self._ylim_input_buffer or '').strip()
+        self._awaiting_ylim_input = False
+        self._ylim_input_buffer = ''
+        if raw == '':
+            self._ylim = None
+            self.log('ylim cleared', INFO)
+            return
         try:
-            self.logger.replace_last(self.term.white(f"{INFO} Enter xlim in steps as start:end (ESC to cancel): {self._xlim_input_buffer}"))
+            if ':' in raw:
+                start_s, end_s = raw.split(':', 1)
+                y_min = float(start_s.strip())
+                y_max = float(end_s.strip())
+            else:
+                y_min = 0.0
+                y_max = float(raw)
+            if y_min > y_max:
+                y_min, y_max = y_max, y_min
+            self._ylim = (y_min, y_max)
+            self.log(f'set ylim to {self._ylim[0]}:{self._ylim[1]}', INFO)
         except Exception as e:
-            self.log(f'failed to render xlim prompt: {e}', WARN)
-            pass
+            self.log(f'failed to parse ylim: {e}', WARN)
+
+    def _render_ylim_prompt(self):
+        self.logger.replace_last(self.term.white(f"{INFO} Enter ylim as min:max (ESC to cancel): {self._ylim_input_buffer}"))
 
     def _moving_average(self, values, window):
         if window <= 1 or not values:
