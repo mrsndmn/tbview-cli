@@ -386,6 +386,10 @@ class TensorboardViewer:
                             self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}: {e}', WARN)
                     else:
                         self.log('computed xlim has non-positive width; ignoring', WARN)
+                else:
+                    # No points within requested range in time-based x axis; clear invalid selection
+                    self.log('requested xlim selects no points in current x mode; clearing', WARN)
+                    self._xlim_steps = None
         # Apply ylim after plotting
         if self._ylim is not None:
             y_min, y_max = self._ylim
@@ -402,7 +406,14 @@ class TensorboardViewer:
             else:
                 self.log('no data range available for ylim; ignoring', WARN)
                 self._ylim = None
-        plt.show()
+        # Safeguard rendering to avoid crashing the UI on plotting errors
+        try:
+            plt.show()
+        except Exception as e:
+            self.log(f'plot rendering failed: {e}', ERROR)
+            # Clear potentially invalid limits to recover next frame
+            self._xlim_steps = None
+            self._ylim = None
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
 
@@ -424,8 +435,25 @@ class TensorboardViewer:
                 end_v = int(raw)
             if start_v > end_v:
                 start_v, end_v = end_v, start_v
-            self._xlim_steps = (start_v, end_v)
-            self.log(f'set xlim (steps) to {self._xlim_steps[0]}:{self._xlim_steps[1]}', INFO)
+            # Validate against available step range for currently selected tag
+            selected_tag = self._get_selected_tag()
+            gmin, gmax = self._get_global_step_range_for_tag(selected_tag)
+            if gmin is None or gmax is None:
+                self._xlim_steps = None
+                self.log('no data available to apply xlim; ignoring', WARN)
+                return
+            # Clamp to data range
+            cx0 = max(start_v, gmin)
+            cx1 = min(end_v, gmax)
+            if cx1 <= cx0:
+                self._xlim_steps = None
+                self.log('requested xlim is outside data range; ignoring', WARN)
+                return
+            self._xlim_steps = (cx0, cx1)
+            if (cx0, cx1) != (start_v, end_v):
+                self.log(f'clamped xlim (steps) to {cx0}:{cx1}', INFO)
+            else:
+                self.log(f'set xlim (steps) to {cx0}:{cx1}', INFO)
         except Exception as e:
             self.log(f'failed to parse xlim: {e}', WARN)
 
@@ -457,6 +485,43 @@ class TensorboardViewer:
 
     def _render_ylim_prompt(self):
         self.logger.replace_last(self.term.white(f"{INFO} Enter ylim as min:max (ESC to cancel): {self._ylim_input_buffer}"))
+
+    def _get_selected_tag(self):
+        """Return the currently selected tag name or None if unavailable."""
+        # Collect union of tags across runs
+        all_tags = OrderedDict()
+        for run_tag in self.run_tags:
+            for t in self.records_by_run.get(run_tag, {}):
+                all_tags.setdefault(t, None)
+        keys = list(all_tags.keys())
+        if not keys:
+            return None
+        safe_idx = max(0, min(self.tag_selector.current, len(keys)-1))
+        return keys[safe_idx]
+
+    def _get_global_step_range_for_tag(self, tag):
+        """Compute global min/max step across runs for the given tag.
+
+        Returns (min_step, max_step) or (None, None) if no data.
+        """
+        if tag is None:
+            return None, None
+        global_xmin_step = None
+        global_xmax_step = None
+        for run_tag in self.run_tags:
+            per_run_records = self.records_by_run.get(run_tag, {})
+            if tag not in per_run_records:
+                continue
+            steps = list(per_run_records[tag].keys())
+            if not steps:
+                continue
+            s_first = min(steps)
+            s_last = max(steps)
+            if global_xmin_step is None or s_first < global_xmin_step:
+                global_xmin_step = s_first
+            if global_xmax_step is None or s_last > global_xmax_step:
+                global_xmax_step = s_last
+        return global_xmin_step, global_xmax_step
 
     def _moving_average(self, values, window):
         if window <= 1 or not values:
