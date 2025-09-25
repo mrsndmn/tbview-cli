@@ -233,6 +233,10 @@ class TensorboardViewer:
         global_last_step = None
         global_xlim_min = None
         global_xlim_max = None
+        global_ymin = None
+        global_ymax = None
+        global_xmin_step = None
+        global_xmax_step = None
         for idx, (run_tag, path) in enumerate(zip(self.run_tags, self.event_paths)):
             per_run_records = self.records_by_run.get(run_tag, {})
             if key not in per_run_records:
@@ -316,6 +320,20 @@ class TensorboardViewer:
                 s_last = sorted_steps[-1]
                 if global_last_step is None or s_last > global_last_step:
                     global_last_step = s_last
+                # track global x range in step space
+                s_first = sorted_steps[0]
+                if global_xmin_step is None or s_first < global_xmin_step:
+                    global_xmin_step = s_first
+                if global_xmax_step is None or s_last > global_xmax_step:
+                    global_xmax_step = s_last
+            # track global y range for ylim validation
+            if values:
+                vmin = min(values)
+                vmax = max(values)
+                if global_ymin is None or vmin < global_ymin:
+                    global_ymin = vmin
+                if global_ymax is None or vmax > global_ymax:
+                    global_ymax = vmax
 
             # Compute desired axis-space xlim from step-based limits without filtering
             if self._xlim_steps is not None:
@@ -345,26 +363,43 @@ class TensorboardViewer:
         if self._xlim_steps is not None:
             start_s, end_s = self._xlim_steps
             if x_mode == 'step':
-                try:
-                    plt.xlim(start_s, end_s)
-                except Exception as e:
-                    self.log(f'failed to set xlim for steps: {global_xlim_min} {global_xlim_max}: {e}', WARN)
-                    pass
+                # clamp to available step range to avoid plotext errors
+                if global_xmin_step is not None and global_xmax_step is not None:
+                    x0 = min(start_s, end_s)
+                    x1 = max(start_s, end_s)
+                    cx0 = max(x0, global_xmin_step)
+                    cx1 = min(x1, global_xmax_step)
+                    if cx1 > cx0:
+                        plt.xlim(cx0, cx1)
+                    else:
+                        self.log('requested xlim is outside data range; ignoring', WARN)
+                        self._xlim_steps = None
+                else:
+                    self.log('no data range available for xlim; ignoring', WARN)
+                    self._xlim_steps = None
             else:
                 if global_xlim_min is not None and global_xlim_max is not None:
-                    try:
+                    if global_xlim_max > global_xlim_min:
                         plt.xlim(global_xlim_min, global_xlim_max)
-                    except Exception as e:
-                        self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}: {e}', WARN)
-                        pass
+                        self._xlim_steps = None
+                    else:
+                        self.log('computed xlim has non-positive width; ignoring', WARN)
         # Apply ylim after plotting
         if self._ylim is not None:
             y_min, y_max = self._ylim
-            try:
-                plt.ylim(y_min, y_max)
-            except Exception as e:
-                self.log(f'failed to set ylim {y_min} {y_max}: {e}', WARN)
-                pass
+            if global_ymin is not None and global_ymax is not None:
+                a = min(y_min, y_max)
+                b = max(y_min, y_max)
+                cy0 = max(a, global_ymin)
+                cy1 = min(b, global_ymax)
+                if cy1 > cy0:
+                    plt.ylim(cy0, cy1)
+                else:
+                    self.log('requested ylim is outside data range; ignoring', WARN)
+                    self._ylim = None
+            else:
+                self.log('no data range available for ylim; ignoring', WARN)
+                self._ylim = None
         plt.show()
         if self._profile_enabled:
             self.log(f'plot took {(time.perf_counter()-t0)*1000:.1f}ms', DEBUG)
