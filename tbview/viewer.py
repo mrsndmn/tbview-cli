@@ -252,6 +252,7 @@ class TensorboardViewer:
             speed_str = None
             try:
                 eta_sec, steps_per_sec = self._compute_run_epoch_eta(run_tag)
+                self.log(f'eta_sec: {eta_sec}, steps_per_sec: {steps_per_sec}', DEBUG)
                 if eta_sec is not None:
                     eta_str = self._format_duration(eta_sec)
                 if steps_per_sec is not None and steps_per_sec > 0:
@@ -306,10 +307,6 @@ class TensorboardViewer:
 
         last_step = global_last_step
         plt.title(f"{key} (smooth={self.smoothing_window}, last_step={last_step})")
-        try:
-            plt.legend(True)
-        except Exception:
-            pass
         plt.xfrequency(10)
         plt.xlabel(xlabel)
         # Apply xlim after plotting
@@ -318,15 +315,15 @@ class TensorboardViewer:
             if x_mode == 'step':
                 try:
                     plt.xlim(start_s, end_s)
-                except Exception:
-                    self.log(f'failed to set xlim for steps: {global_xlim_min} {global_xlim_max}', WARN)
+                except Exception as e:
+                    self.log(f'failed to set xlim for steps: {global_xlim_min} {global_xlim_max}: {e}', WARN)
                     pass
             else:
                 if global_xlim_min is not None and global_xlim_max is not None:
                     try:
                         plt.xlim(global_xlim_min, global_xlim_max)
-                    except Exception:
-                        self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}', WARN)
+                    except Exception as e:
+                        self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}: {e}', WARN)
                         pass
         plt.show()
         if self._profile_enabled:
@@ -358,7 +355,8 @@ class TensorboardViewer:
     def _render_xlim_prompt(self):
         try:
             self.logger.replace_last(self.term.white(f"{INFO} Enter xlim in steps as start:end (ESC to cancel): {self._xlim_input_buffer}"))
-        except Exception:
+        except Exception as e:
+            self.log(f'failed to render xlim prompt: {e}', WARN)
             pass
 
     def _moving_average(self, values, window):
@@ -378,7 +376,8 @@ class TensorboardViewer:
     def _format_duration(self, seconds):
         try:
             secs = max(0, int(round(seconds)))
-        except Exception:
+        except Exception as e:
+            self.log(f'failed to format duration: {e}', WARN)
             return "?"
         h = secs // 3600
         m = (secs % 3600) // 60
@@ -409,7 +408,8 @@ class TensorboardViewer:
                 if v is not None and float(v) >= 1.0 and t is not None:
                     idx_ge1 = i
                     break
-            except Exception:
+            except Exception as e:
+                self.log(f'failed to compute run epoch eta: {e}', WARN)
                 continue
         if idx_ge1 is not None:
             eta = max(0.0, float(times_abs[idx_ge1] - t0_abs))
@@ -427,7 +427,8 @@ class TensorboardViewer:
                 if v is not None and float(v) > 0 and t is not None:
                     last_idx = i
                     break
-            except Exception:
+            except Exception as e:
+                self.log(f'failed to compute run epoch eta: {e}', WARN)
                 continue
         if last_idx is None:
             return None
@@ -439,7 +440,7 @@ class TensorboardViewer:
         speed = (steps_elapsed / time_elapsed) if time_elapsed > 0 else None
         if frac <= 0:
             return None
-        eta = max(0.0, t_rel * (1.0 / frac))
+        eta = max(0.0, t_rel * (1.0 / frac) - time_elapsed)
         return eta, speed
 
     def run(self):
