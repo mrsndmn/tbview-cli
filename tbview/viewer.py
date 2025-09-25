@@ -44,7 +44,7 @@ class TensorboardViewer:
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'x' to toggle X axis (step/rel/abs).\n\n 7.Press 'l' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'm' to toggle X axis (step/rel/abs).\n\n 7.Press 'x' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -186,12 +186,12 @@ class TensorboardViewer:
                 self.smoothing_index = (self.smoothing_index + 1) % len(self.smoothing_levels)
                 self.smoothing_window = self.smoothing_levels[self.smoothing_index]
                 self.log(f'smoothing set to {self.smoothing_window}', INFO)
-            elif str(key).lower() == 'x':
+            elif str(key).lower() == 'm':
                 self.x_mode_index = (self.x_mode_index + 1) % len(self.x_axis_modes)
                 self.log(f"X axis set to {self.x_axis_modes[self.x_mode_index]}", INFO)
             elif str(key).lower() == 'q':
                 self._quit_and_reselect = True
-            elif str(key).lower() == 'l':
+            elif str(key).lower() == 'x':
                 self._awaiting_xlim_input = True
                 self._xlim_input_buffer = ''
                 self.log("Enter xlim in steps as start:end (empty to clear). Press Enter to apply.", INFO)
@@ -380,8 +380,10 @@ class TensorboardViewer:
             else:
                 if global_xlim_min is not None and global_xlim_max is not None:
                     if global_xlim_max > global_xlim_min:
-                        plt.xlim(global_xlim_min, global_xlim_max)
-                        self._xlim_steps = None
+                        try:
+                            plt.xlim(global_xlim_min, global_xlim_max)
+                        except Exception as e:
+                            self.log(f'failed to set xlim for {x_mode}: {global_xlim_min} {global_xlim_max}: {e}', WARN)
                     else:
                         self.log('computed xlim has non-positive width; ignoring', WARN)
         # Apply ylim after plotting
