@@ -38,21 +38,20 @@ def run_main(args):
             target_event_name = os.path.basename(path)
             target_event_dir = None
     elif os.path.isdir(path):
-        target_options = []
-        for root, dirs, files in os.walk(path):
-            for file in files:
-                if is_event_file(file):
-                    size = os.path.getsize(os.path.join(root, file))
-
-                    display_path_no_prefix = root.replace(path, '').lstrip(os.sep)
-                    target_options.append((root, file, size, display_path_no_prefix))
-        if len(target_options) == 0:
-            raise RuntimeError(f"No event file found in directory {path}")
-        target_options = sorted(target_options, key=lambda x:x[1], reverse=True)
-        options = [f'[{i}] {op[3]}/{local_event_name(op[1])}' for i, op in enumerate(target_options)]
-
-        # Loop to support going back from viewer with 'q'
+        # Loop to support going back from viewer with 'q' and refreshing available logs
         while True:
+            target_options = []
+            for root, dirs, files in os.walk(path):
+                for file in files:
+                    if is_event_file(file):
+                        size = os.path.getsize(os.path.join(root, file))
+                        display_path_no_prefix = root.replace(path, '').lstrip(os.sep)
+                        target_options.append((root, file, size, display_path_no_prefix))
+            if len(target_options) == 0:
+                raise RuntimeError(f"No event file found in directory {path}")
+            target_options = sorted(target_options, key=lambda x:x[1], reverse=True)
+            options = [f'[{i}] {op[3]}/{local_event_name(op[1])}' for i, op in enumerate(target_options)]
+
             questions = [
                 inquirer.Checkbox('choices',
                                    message="Select one or more event files (space to toggle, enter to view)",
