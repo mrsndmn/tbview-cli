@@ -44,7 +44,7 @@ class TensorboardViewer:
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or W/S to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'm' to toggle X axis (step/rel/abs).\n\n 7.Press 'x' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
+                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'm' to toggle X axis (step/rel/abs).\n\n 7.Press 'x' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
