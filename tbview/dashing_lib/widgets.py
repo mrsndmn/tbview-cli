@@ -36,6 +36,7 @@ class SelectionTile(Text):
         super().__init__('', color, *args, **kw)
         self._current = current
         self._options = options
+        self._scroll_offset = 0
 
     @property
     def current(self):
@@ -43,6 +44,18 @@ class SelectionTile(Text):
     
     @current.setter
     def current(self, c):
+        try:
+            c = int(c)
+        except Exception:
+            c = 0
+        if not self._options:
+            self._current = 0
+            self._scroll_offset = 0
+            return
+        if c < 0:
+            c = 0
+        if c >= len(self._options):
+            c = len(self._options) - 1
         self._current = c
     
     @property
@@ -52,6 +65,19 @@ class SelectionTile(Text):
     @options.setter
     def options(self, options):
         self._options = options
+        # Keep selection and scroll offset in a valid range.
+        if not self._options:
+            self._current = 0
+            self._scroll_offset = 0
+        else:
+            if self._current < 0:
+                self._current = 0
+            if self._current >= len(self._options):
+                self._current = len(self._options) - 1
+            if self._scroll_offset < 0:
+                self._scroll_offset = 0
+            if self._scroll_offset >= len(self._options):
+                self._scroll_offset = max(0, len(self._options) - 1)
     
     def _apply_options_to_text(self, tbox:TBox):
         t = tbox.t
@@ -65,10 +91,24 @@ class SelectionTile(Text):
         # Render options without wrapping to avoid breaking ANSI sequences
         tbox = self._draw_borders_and_title(tbox)
         t = tbox.t
+        # Ensure current selection is visible within the viewport.
+        viewport_h = max(0, tbox.h)
+        if self._options and viewport_h > 0:
+            if self._current < self._scroll_offset:
+                self._scroll_offset = self._current
+            elif self._current >= self._scroll_offset + viewport_h:
+                self._scroll_offset = self._current - viewport_h + 1
+            max_offset = max(0, len(self._options) - viewport_h)
+            if self._scroll_offset > max_offset:
+                self._scroll_offset = max_offset
+
         dx = 0
-        for i, opt in enumerate(self._options):
+        start = self._scroll_offset
+        end = len(self._options)
+        for i in range(start, end):
             if dx >= tbox.h:
                 break
+            opt = self._options[i]
             visible_text = opt[:tbox.w]
             styled = (t.on_white if i == self._current else t.white)(visible_text)
             print(

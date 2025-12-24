@@ -44,7 +44,19 @@ class TensorboardViewer:
         self.ui = RatioHSplit(
             PlotextTile(self.plot, title='Plot', border_color=15),
             RatioVSplit(
-                Text(" 1.Press arrow keys to locate coordinates.\n\n 2.Use number 1-9 or to select tag.\n\n 3.Press 'q' to go back to selection.\n\n 4.Ctrl+C to quit.\n\n 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n 6.Press 'm' to toggle X axis (step/rel/abs).\n\n 7.Press 'x' to set xlim in steps (start:end), ESC to cancel.\n\n 8.Press 'y' to set ylim (min:max), ESC to cancel.", color=15, title=' Tips', border_color=15),
+                Text(
+                    " 1.Use Up/Down, PgUp/PgDn, Home/End, Tab/Shift-Tab, or [ / ] to switch tags.\n\n"
+                    " 2.Use number 1-9 to quick-select tags 1-9.\n\n"
+                    " 3.Press 'q' to go back to selection.\n\n"
+                    " 4.Ctrl+C to quit.\n\n"
+                    " 5.Press 's' to toggle smoothing (0/10/50/100/200).\n\n"
+                    " 6.Press 'm' to toggle X axis (step/rel/abs).\n\n"
+                    " 7.Press 'x' to set xlim in steps (start:end), ESC to cancel.\n\n"
+                    " 8.Press 'y' to set ylim (min:max), ESC to cancel.",
+                    color=15,
+                    title=' Tips',
+                    border_color=15
+                ),
                 self.tag_selector,
                 self.logger,
                 ratios=(2, 4, 2),
@@ -72,6 +84,31 @@ class TensorboardViewer:
         self._last_scan_ts = time.time()
         self._quit_and_reselect = False
         self.scan_events(initial=True)
+
+    def _tag_count(self):
+        return len(self.tag_selector.options or [])
+
+    def _select_tag_index(self, idx):
+        n = self._tag_count()
+        if n <= 0:
+            self.tag_selector.current = 0
+            return
+        if idx < 0:
+            idx = 0
+        if idx >= n:
+            idx = n - 1
+        self.tag_selector.current = idx
+
+    def _move_tag_selection(self, delta, wrap=False):
+        n = self._tag_count()
+        if n <= 0:
+            self.tag_selector.current = 0
+            return
+        cur = int(getattr(self.tag_selector, 'current', 0) or 0)
+        nxt = cur + int(delta)
+        if wrap:
+            nxt %= n
+        self._select_tag_index(nxt)
 
 
     def scan_events(self, initial=False):
@@ -176,12 +213,32 @@ class TensorboardViewer:
             return
 
         if key.is_sequence:
-            pass
+            name = getattr(key, 'name', '')
+            if name in ('KEY_UP',):
+                self._move_tag_selection(-1, wrap=False)
+            elif name in ('KEY_DOWN',):
+                self._move_tag_selection(+1, wrap=False)
+            elif name in ('KEY_PGUP', 'KEY_PAGEUP'):
+                self._move_tag_selection(-10, wrap=False)
+            elif name in ('KEY_PGDOWN', 'KEY_PAGEDOWN'):
+                self._move_tag_selection(+10, wrap=False)
+            elif name in ('KEY_HOME',):
+                self._select_tag_index(0)
+            elif name in ('KEY_END',):
+                self._select_tag_index(self._tag_count() - 1)
+            elif name in ('KEY_TAB',):
+                self._move_tag_selection(+1, wrap=True)
+            elif name in ('KEY_BTAB',):
+                self._move_tag_selection(-1, wrap=True)
         else:
             if key.isdigit():
                 digit = int(key)
                 if digit > 0 and digit <= len(self.tag_selector.options):
                     self.tag_selector.current = digit - 1
+            elif str(key) == '[':
+                self._move_tag_selection(-1, wrap=True)
+            elif str(key) == ']':
+                self._move_tag_selection(+1, wrap=True)
             elif str(key).lower() == 's':
                 self.smoothing_index = (self.smoothing_index + 1) % len(self.smoothing_levels)
                 self.smoothing_window = self.smoothing_levels[self.smoothing_index]
