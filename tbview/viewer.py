@@ -12,6 +12,9 @@ WARN = '[WARN]'
 INFO = '[INFO]'
 DEBUG = '[DEBUG]'
 
+# Maximum number of points to render before applying sampling
+MAX_PLOT_POINTS = 1000
+
 class TensorboardViewer:
     def __init__(self, event_path, event_tag) -> None:
         # Support single or multiple runs
@@ -283,6 +286,13 @@ class TensorboardViewer:
                             xlabel = 'time since start (h)'
                             fmt = '{:.1f}'
                         x_vals = [r / divisor for r in rel]
+
+            # Keep original values for range tracking before sampling
+            values_for_range = values
+
+            # Sample data points if there are too many to render efficiently
+            x_vals, values = self._sample_data(x_vals, values)
+
             # Compute per-run ETA and speed (steps/s) using train/epoch, always show if available
             eta_str = None
             speed_str = None
@@ -326,10 +336,10 @@ class TensorboardViewer:
                     global_xmin_step = s_first
                 if global_xmax_step is None or s_last > global_xmax_step:
                     global_xmax_step = s_last
-            # track global y range for ylim validation
-            if values:
-                vmin = min(values)
-                vmax = max(values)
+            # track global y range for ylim validation (use original values before sampling)
+            if values_for_range:
+                vmin = min(values_for_range)
+                vmax = max(values_for_range)
                 if global_ymin is None or vmin < global_ymin:
                     global_ymin = vmin
                 if global_ymax is None or vmax > global_ymax:
@@ -536,6 +546,48 @@ class TensorboardViewer:
             count = i - start + 1
             smoothed.append(total / count)
         return smoothed
+
+    def _sample_data(self, x_vals, y_vals, max_points=MAX_PLOT_POINTS):
+        """
+        Sample data points to reduce rendering overhead for large datasets.
+        Uses uniform sampling while preserving first and last points.
+
+        Args:
+            x_vals: List of x-axis values
+            y_vals: List of y-axis values
+            max_points: Maximum number of points to keep (default: MAX_PLOT_POINTS)
+
+        Returns:
+            Tuple of (sampled_x_vals, sampled_y_vals)
+        """
+        if len(x_vals) <= max_points or len(y_vals) <= max_points:
+            return x_vals, y_vals
+
+        if len(x_vals) != len(y_vals):
+            # Safety check - should not happen in practice
+            return x_vals, y_vals
+
+        n = len(x_vals)
+        # Calculate step size for uniform sampling
+        # We want to keep approximately max_points
+        step = n / max_points
+
+        # Always keep first point
+        sampled_x = [x_vals[0]]
+        sampled_y = [y_vals[0]]
+
+        # Sample intermediate points uniformly
+        for i in range(1, max_points - 1):
+            idx = int(i * step)
+            if idx < n - 1:  # Ensure we don't accidentally include the last point twice
+                sampled_x.append(x_vals[idx])
+                sampled_y.append(y_vals[idx])
+
+        # Always keep last point
+        sampled_x.append(x_vals[-1])
+        sampled_y.append(y_vals[-1])
+
+        return sampled_x, sampled_y
 
     def _format_duration(self, seconds):
         try:

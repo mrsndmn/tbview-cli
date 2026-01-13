@@ -44,3 +44,38 @@ def test_compute_run_epoch_eta_and_speed_from_epoch_series():
     assert speed is not None and abs(speed - 1.0) < 1e-6
 
 
+def test_sample_data_returns_original_when_below_threshold():
+    dummy = Dummy()
+    x = list(range(500))
+    y = [i * 2 for i in range(500)]
+    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y, max_points=1000)
+    assert x_sampled == x
+    assert y_sampled == y
+
+
+def test_sample_data_reduces_points_when_above_threshold():
+    dummy = Dummy()
+    x = list(range(5000))
+    y = [i * 2 for i in range(5000)]
+    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y, max_points=1000)
+    # Should reduce to approximately max_points
+    assert len(x_sampled) <= 1000
+    assert len(y_sampled) <= 1000
+    assert len(x_sampled) == len(y_sampled)
+    # Should preserve first and last points
+    assert x_sampled[0] == x[0]
+    assert x_sampled[-1] == x[-1]
+    assert y_sampled[0] == y[0]
+    assert y_sampled[-1] == y[-1]
+
+
+def test_sample_data_preserves_correspondence():
+    dummy = Dummy()
+    x = list(range(3000))
+    y = [i * 3 + 5 for i in range(3000)]
+    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y, max_points=500)
+    # Check that x and y values still correspond (y = x * 3 + 5)
+    for xs, ys in zip(x_sampled, y_sampled):
+        assert ys == xs * 3 + 5
+
+
