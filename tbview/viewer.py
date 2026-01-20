@@ -263,6 +263,22 @@ class TensorboardViewer:
     def log(self, msg, level=''):
         self.logger.append(self.term.white(f'{level} {msg}'))
 
+    def _truncate_label(self, label, max_width):
+        """Truncate label to fit max_width, showing first N and last N characters."""
+        if len(label) <= max_width:
+            return label
+        # Reserve space for "..."
+        ellipsis_len = 3
+        # Calculate how many characters we can show on each side
+        # We want to show equal amounts on both sides
+        available_chars = max_width - ellipsis_len
+        if available_chars < 2:
+            # Too narrow, just truncate
+            return label[:max_width]
+        n = available_chars // 2
+        # Show first n and last n characters with "..." in between
+        return label[:n] + "..." + label[-n:]
+
     def plot(self, tbox):
         import time
         t0 = time.perf_counter()
@@ -369,6 +385,10 @@ class TensorboardViewer:
                     extra_parts.append(speed_str)
                 if extra_parts:
                     plot_label = f"{plot_label} (" + ", ".join(extra_parts) + ")"
+                # Truncate label if it doesn't fit on screen
+                # Estimate available width: leave ~30% for plot, rest for legend
+                max_label_width = max(20, int(tbox.w * 0.7))
+                plot_label = self._truncate_label(plot_label, max_label_width)
                 plt.plot(x_vals, values, label=plot_label, color=color)
             except Exception:
                 plt.plot(x_vals, values, color=color)
