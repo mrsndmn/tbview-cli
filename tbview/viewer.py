@@ -12,12 +12,13 @@ WARN = '[WARN]'
 INFO = '[INFO]'
 DEBUG = '[DEBUG]'
 
-# Maximum number of points to render before applying sampling
-MAX_PLOT_POINTS = 1000
+# Target number of events to load during initial scan
+# Sample rate is dynamically calculated to load approximately this many events
+TARGET_INITIAL_EVENTS = 10000
 
-# Event sampling rate for initial load (1 = load all, 10 = load every 10th event)
-# Higher values = faster initial load but less initial data
-INITIAL_LOAD_SAMPLE_RATE = 10
+# Target number of points to render for smooth visualization
+# Sample rate is dynamically calculated based on actual data points
+TARGET_RENDER_POINTS = 1500
 
 class TensorboardViewer:
     def __init__(self, event_path, event_tag) -> None:
@@ -81,6 +82,25 @@ class TensorboardViewer:
         self.scan_events(initial=True)
 
 
+    def _calculate_load_sample_rate(self, file_size_bytes):
+        """
+        Calculate dynamic sample rate for initial load based on file size.
+
+        Args:
+            file_size_bytes: Size of the event file in bytes
+
+        Returns:
+            Sample rate (1 = load all events, 10 = load every 10th event)
+        """
+        # Estimate events in file (typical event is ~200 bytes compressed)
+        ESTIMATED_BYTES_PER_EVENT = 200
+        estimated_events = max(1, file_size_bytes // ESTIMATED_BYTES_PER_EVENT)
+
+        # Calculate sample rate to achieve target number of loaded events
+        sample_rate = max(1, estimated_events // TARGET_INITIAL_EVENTS)
+
+        return sample_rate
+
     def scan_events(self, initial=False):
         import os, time
         start_ts = time.perf_counter()
@@ -92,8 +112,14 @@ class TensorboardViewer:
             # Skip scan if no growth
             if not initial and current_size == self._last_scan_size_by_run.get(run_tag, 0):
                 continue
-            # Incremental read per run with optional sampling during initial load
-            sample_rate = INITIAL_LOAD_SAMPLE_RATE if initial else 1
+            # Calculate dynamic sample rate for initial load based on file size
+            if initial:
+                sample_rate = self._calculate_load_sample_rate(current_size)
+                if sample_rate > 1:
+                    self.log(f'Large file detected ({current_size // (1024*1024)}MB), sampling every {sample_rate} events for fast initial load', INFO)
+            else:
+                sample_rate = 1
+
             for event, end_off in read_records_from_offset(
                 path,
                 self._last_offset_by_run.get(run_tag, 0),
@@ -560,37 +586,40 @@ class TensorboardViewer:
             smoothed.append(total / count)
         return smoothed
 
-    def _sample_data(self, x_vals, y_vals, max_points=MAX_PLOT_POINTS):
+    def _sample_data(self, x_vals, y_vals):
         """
-        Sample data points to reduce rendering overhead for large datasets.
+        Dynamically sample data points to reduce rendering overhead for large datasets.
         Uses uniform sampling while preserving first and last points.
+        Only applies sampling if data exceeds TARGET_RENDER_POINTS.
 
         Args:
             x_vals: List of x-axis values
             y_vals: List of y-axis values
-            max_points: Maximum number of points to keep (default: MAX_PLOT_POINTS)
 
         Returns:
             Tuple of (sampled_x_vals, sampled_y_vals)
         """
-        if len(x_vals) <= max_points or len(y_vals) <= max_points:
+        n = len(x_vals)
+
+        # Only sample if we have significantly more points than target
+        # Use a 1.5x threshold to avoid sampling when close to target
+        if n <= TARGET_RENDER_POINTS * 1.5 or len(y_vals) <= TARGET_RENDER_POINTS * 1.5:
             return x_vals, y_vals
 
         if len(x_vals) != len(y_vals):
             # Safety check - should not happen in practice
             return x_vals, y_vals
 
-        n = len(x_vals)
         # Calculate step size for uniform sampling
-        # We want to keep approximately max_points
-        step = n / max_points
+        # We want to keep approximately TARGET_RENDER_POINTS
+        step = n / TARGET_RENDER_POINTS
 
         # Always keep first point
         sampled_x = [x_vals[0]]
         sampled_y = [y_vals[0]]
 
         # Sample intermediate points uniformly
-        for i in range(1, max_points - 1):
+        for i in range(1, TARGET_RENDER_POINTS - 1):
             idx = int(i * step)
             if idx < n - 1:  # Ensure we don't accidentally include the last point twice
                 sampled_x.append(x_vals[idx])

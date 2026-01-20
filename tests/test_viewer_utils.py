@@ -45,22 +45,26 @@ def test_compute_run_epoch_eta_and_speed_from_epoch_series():
 
 
 def test_sample_data_returns_original_when_below_threshold():
+    """Test that small datasets are not sampled"""
     dummy = Dummy()
-    x = list(range(500))
-    y = [i * 2 for i in range(500)]
-    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y, max_points=1000)
+    # Use data size below threshold (TARGET_RENDER_POINTS * 1.5 = 2250)
+    x = list(range(2000))
+    y = [i * 2 for i in range(2000)]
+    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y)
     assert x_sampled == x
     assert y_sampled == y
 
 
 def test_sample_data_reduces_points_when_above_threshold():
+    """Test that large datasets are sampled to TARGET_RENDER_POINTS"""
     dummy = Dummy()
-    x = list(range(5000))
-    y = [i * 2 for i in range(5000)]
-    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y, max_points=1000)
-    # Should reduce to approximately max_points
-    assert len(x_sampled) <= 1000
-    assert len(y_sampled) <= 1000
+    # Use data size well above threshold to trigger sampling
+    x = list(range(10000))
+    y = [i * 2 for i in range(10000)]
+    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y)
+    # Should reduce to approximately TARGET_RENDER_POINTS (1500)
+    assert len(x_sampled) <= 1600  # Allow some margin
+    assert len(y_sampled) <= 1600
     assert len(x_sampled) == len(y_sampled)
     # Should preserve first and last points
     assert x_sampled[0] == x[0]
@@ -70,10 +74,12 @@ def test_sample_data_reduces_points_when_above_threshold():
 
 
 def test_sample_data_preserves_correspondence():
+    """Test that sampling preserves x-y value correspondence"""
     dummy = Dummy()
-    x = list(range(3000))
-    y = [i * 3 + 5 for i in range(3000)]
-    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y, max_points=500)
+    # Use data size above threshold to trigger sampling
+    x = list(range(5000))
+    y = [i * 3 + 5 for i in range(5000)]
+    x_sampled, y_sampled = TensorboardViewer._sample_data(dummy, x, y)
     # Check that x and y values still correspond (y = x * 3 + 5)
     for xs, ys in zip(x_sampled, y_sampled):
         assert ys == xs * 3 + 5
