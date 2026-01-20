@@ -15,6 +15,10 @@ DEBUG = '[DEBUG]'
 # Maximum number of points to render before applying sampling
 MAX_PLOT_POINTS = 1000
 
+# Event sampling rate for initial load (1 = load all, 10 = load every 10th event)
+# Higher values = faster initial load but less initial data
+INITIAL_LOAD_SAMPLE_RATE = 10
+
 class TensorboardViewer:
     def __init__(self, event_path, event_tag) -> None:
         # Support single or multiple runs
@@ -88,12 +92,21 @@ class TensorboardViewer:
             # Skip scan if no growth
             if not initial and current_size == self._last_scan_size_by_run.get(run_tag, 0):
                 continue
-            # Incremental read per run
+            # Incremental read per run with optional sampling during initial load
+            sample_rate = INITIAL_LOAD_SAMPLE_RATE if initial else 1
             for event, end_off in read_records_from_offset(
                 path,
                 self._last_offset_by_run.get(run_tag, 0),
-                warn=lambda msg: self.log(msg, WARN)
+                warn=lambda msg: self.log(msg, WARN),
+                sample_rate=sample_rate
             ):
+                # Update offset regardless of whether event was parsed
+                self._last_offset_by_run[run_tag] = end_off
+
+                # Skip if event was not parsed (sampled out)
+                if event is None:
+                    continue
+
                 summary = event.summary
                 for value in summary.value:
                     if value.HasField('simple_value'):
@@ -105,7 +118,7 @@ class TensorboardViewer:
                             per_run_times[value.tag] = {}
                         per_run_records[value.tag][event.step] = value.simple_value
                         per_run_times[value.tag][event.step] = getattr(event, 'wall_time', None)
-                self._last_offset_by_run[run_tag] = end_off
+
             self._last_scan_size_by_run[run_tag] = current_size
             try:
                 self._last_seen_mtime_by_run[run_tag] = os.path.getmtime(path)

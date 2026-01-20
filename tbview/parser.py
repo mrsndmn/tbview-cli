@@ -66,12 +66,19 @@ def read_records(file_path, warn: Optional[Callable[[str], None]] = None):
             yield event
 
 
-def read_records_from_offset(file_path: str, start_offset: int = 0, warn: Optional[Callable[[str], None]] = None) -> Iterator[Tuple[Event, int]]:
+def read_records_from_offset(file_path: str, start_offset: int = 0, warn: Optional[Callable[[str], None]] = None, sample_rate: int = 1) -> Iterator[Tuple[Event, int]]:
     """Read tensorboard events starting from a file offset.
 
     Yields tuples of (Event, end_offset) where end_offset is the file position
     immediately after reading the event and its CRC trailer. This enables
     incremental reading by resuming from the last offset next time.
+
+    Args:
+        file_path: Path to the tensorboard event file
+        start_offset: Byte offset to start reading from
+        warn: Optional warning callback function
+        sample_rate: Only parse and yield every Nth event (default: 1 = all events)
+                    Higher values speed up loading but provide less data
     """
     MAX_RECORD_BYTES = 64 * 1024 * 1024  # 64MB safety cap
     def _warn(msg: str):
@@ -82,6 +89,7 @@ def read_records_from_offset(file_path: str, start_offset: int = 0, warn: Option
     with open(file_path, 'rb') as f:
         if start_offset:
             f.seek(start_offset)
+        event_counter = 0
         while True:
             header_pos = f.tell()
             length_raw = f.read(8)
@@ -107,10 +115,20 @@ def read_records_from_offset(file_path: str, start_offset: int = 0, warn: Option
             if len(payload_crc) < 4 or not test_crc32c(event_raw, payload_crc):
                 _warn('Warning: Invalid payload CRC, stopping read')
                 break
+
+            event_counter += 1
+            end_offset = f.tell()
+
+            # Skip parsing if not matching sample rate
+            if sample_rate > 1 and event_counter % sample_rate != 0:
+                # Yield None to indicate skipped event but update offset
+                yield None, end_offset
+                continue
+
             try:
                 event = Event()
                 event.ParseFromString(event_raw)
             except Exception as e:
                 _warn(f'Warning: Failed to parse Event proto: {e}. Stopping read')
                 break
-            yield event, f.tell()
+            yield event, end_offset
